@@ -38,6 +38,8 @@
     {
         // Allow access to Home page without authentication
         return pageType == typeof(Pages.Home) || 
-               pageType == typeof(Pages.Authentication);
+               pageType == typeof(Pages.Authentication) ||
+               pageType == typeof(Pages.PdfMerge) ||
+               pageType == typeof(Pages.FileConverter);
     }
 }
