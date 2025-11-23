@@ -32,6 +32,77 @@
 
     <script src="_framework/blazor.webassembly.js"></script>
     <script src="_content/Microsoft.Authentication.WebAssembly.Msal/AuthenticationService.js"></script>
+    <script>
+        window.downloadFile = (filename, contentType, content) => {
+            const blob = new Blob([new Uint8Array(content)], { type: contentType });
+            const url = URL.createObjectURL(blob);
+            const link = document.createElement('a');
+            link.href = url;
+            link.download = filename;
+            document.body.appendChild(link);
+            link.click();
+            document.body.removeChild(link);
+            URL.revokeObjectURL(url);
+        };
+
+        window.getImageInfo = (imageBytes) => {
+            return new Promise((resolve, reject) => {
+                try {
+                    console.log('getImageInfo called with imageBytes length:', imageBytes.length);
+                    const blob = new Blob([new Uint8Array(imageBytes)], { type: 'image/*' });
+                    const url = URL.createObjectURL(blob);
+                    const img = new Image();
+                    
+                    img.onload = () => {
+                        console.log('Image loaded successfully:', img.naturalWidth, 'x', img.naturalHeight);
+                        URL.revokeObjectURL(url);
+                        resolve({
+                            width: img.naturalWidth,
+                            height: img.naturalHeight
+                        });
+                    };
+                    
+                    img.onerror = (error) => {
+                        console.error('Image load error:', error);
+                        URL.revokeObjectURL(url);
+                        reject(new Error('Failed to load image'));
+                    };
+                    
+                    img.src = url;
+                } catch (error) {
+                    console.error('getImageInfo error:', error);
+                    reject(error);
+                }
+            });
+        };
+
+        window.getImageInfoFromBase64 = (base64Data) => {
+            return new Promise((resolve, reject) => {
+                try {
+                    console.log('getImageInfoFromBase64 called with base64 length:', base64Data.length);
+                    const img = new Image();
+                    
+                    img.onload = () => {
+                        console.log('Base64 image loaded successfully:', img.naturalWidth, 'x', img.naturalHeight);
+                        resolve({
+                            width: img.naturalWidth,
+                            height: img.naturalHeight
+                        });
+                    };
+                    
+                    img.onerror = (error) => {
+                        console.error('Base64 image load error:', error);
+                        reject(new Error('Failed to load base64 image'));
+                    };
+                    
+                    img.src = 'data:image/*;base64,' + base64Data;
+                } catch (error) {
+                    console.error('getImageInfoFromBase64 error:', error);
+                    reject(error);
+                }
+            });
+        };
+    </script>
     <!-- <script>navigator.serviceWorker.register('service-worker.js');</script> -->
 </body>
 

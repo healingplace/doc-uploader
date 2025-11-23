@@ -1,0 +1,302 @@
+@page "/pdfmerge"
+@using UploaderDoc.Services
+@using Microsoft.JSInterop
+@inject IPdfMergeService PdfMergeService
+@inject IJSRuntime JSRuntime
+
+<PageTitle>PDF Merge - UploaderDoc</PageTitle>
+
+<div class="container-fluid">
+    <div class="row">
+        <div class="col-12">
+            <h1 class="mb-4">
+                <FluentIcon Value="@(new Icons.Regular.Size24.DocumentPdf())" Color="Color.Accent" />
+                PDF Merge Tool
+            </h1>
+            
+            <FluentCard class="mb-4">
+                <div class="card-body">
+                    <h5 class="card-title">Upload PDF Files to Merge</h5>
+                    <p class="card-text text-muted">
+                        Select multiple PDF files to merge them into a single document. 
+                        Files will be merged in the order they are selected.
+                    </p>
+                    
+                    <InputFile id="pdfFiles" 
+                             multiple 
+                             accept=".pdf"
+                             OnChange="@OnPdfFilesSelected"
+                             class="form-control mb-3" />
+                    
+                    @if (selectedFiles.Any())
+                    {
+                        <div class="mt-3">
+                            <h6>Selected Files (@selectedFiles.Count):</h6>
+                            <FluentDataGrid Items="@selectedFiles.AsQueryable()" class="file-grid">
+                                <PropertyColumn Property="@(f => f.Name)" Title="File Name" />
+                                <PropertyColumn Property="@(f => FormatFileSize(f.Size))" Title="Size" />
+                                <TemplateColumn Title="Actions">
+                                    <FluentButton Appearance="Appearance.Lightweight" 
+                                                OnClick="@(() => RemoveFile(context))"
+                                                IconStart="@(new Icons.Regular.Size16.Delete())">
+                                        Remove
+                                    </FluentButton>
+                                </TemplateColumn>
+                            </FluentDataGrid>
+                        </div>
+                        
+                        <div class="mt-3 d-flex gap-2">
+                            <FluentButton Appearance="Appearance.Accent" 
+                                        OnClick="@MergePdfs"
+                                        Loading="@isProcessing"
+                                        Disabled="@(selectedFiles.Count < 2 || isProcessing)"
+                                        IconStart="@(new Icons.Regular.Size16.DocumentArrowRight())">
+                                @if (isProcessing)
+                                {
+                                    <span>Merging PDFs...</span>
+                                }
+                                else
+                                {
+                                    <span>Merge PDFs</span>
+                                }
+                            </FluentButton>
+                            
+                            <FluentButton Appearance="Appearance.Neutral" 
+                                        OnClick="@ClearFiles"
+                                        Disabled="@isProcessing"
+                                        IconStart="@(new Icons.Regular.Size16.Delete())">
+                                Clear All
+                            </FluentButton>
+                        </div>
+                    }
+                </div>
+            </FluentCard>
+            
+            @if (!string.IsNullOrEmpty(statusMessage))
+            {
+                <FluentMessageBar Intent="@messageIntent" Class="mb-3">
+                    @statusMessage
+                </FluentMessageBar>
+            }
+            
+            @if (mergedPdfData != null)
+            {
+                <FluentCard>
+                    <div class="card-body">
+                        <h5 class="card-title text-success">
+                            <FluentIcon Value="@(new Icons.Regular.Size20.CheckmarkCircle())" Color="Color.Success" />
+                            PDF Merge Complete
+                        </h5>
+                        <p class="card-text">
+                            Your PDFs have been successfully merged. Click the button below to download the merged document.
+                        </p>
+                        <FluentButton Appearance="Appearance.Accent" 
+                                    OnClick="DownloadMergedPdf"
+                                    IconStart="@(new Icons.Regular.Size16.ArrowDownload())">
+                            Download Merged PDF
+                        </FluentButton>
+                    </div>
+                </FluentCard>
+            }
+        </div>
+    </div>
+</div>
+
+<style>
+    .file-grid {
+        width: 100%;
+    }
+    
+    .card-body {
+        padding: 1.5rem;
+    }
+    
+    .d-flex {
+        display: flex;
+    }
+    
+    .gap-2 {
+        gap: 0.5rem;
+    }
+    
+    .text-muted {
+        color: #6c757d;
+    }
+    
+    .text-success {
+        color: #198754;
+    }
+    
+    .form-control {
+        display: block;
+        width: 100%;
+        padding: 0.375rem 0.75rem;
+        font-size: 1rem;
+        font-weight: 400;
+        line-height: 1.5;
+        color: var(--fluent-neutral-foreground-rest);
+        background-color: var(--fluent-neutral-fill-input-rest);
+        border: 1px solid var(--fluent-neutral-stroke-control-rest);
+        border-radius: 0.375rem;
+        transition: border-color 0.15s ease-in-out, box-shadow 0.15s ease-in-out;
+    }
+    
+    .form-control:focus {
+        color: var(--fluent-neutral-foreground-rest);
+        background-color: var(--fluent-neutral-fill-input-rest);
+        border-color: var(--fluent-accent-fill-rest);
+        outline: 0;
+        box-shadow: 0 0 0 0.2rem rgba(var(--fluent-accent-fill-rest), 0.25);
+    }
+</style>
+
+@code {
+    private List<(string Name, long Size, byte[] Data)> selectedFiles = new();
+    private byte[]? mergedPdfData;
+    private bool isProcessing = false;
+    private string statusMessage = string.Empty;
+    private MessageIntent messageIntent = MessageIntent.Info;
+    
+    private async Task OnPdfFilesSelected(InputFileChangeEventArgs e)
+    {
+        statusMessage = string.Empty;
+        mergedPdfData = null;
+        
+        var newFiles = e.GetMultipleFiles();
+        
+        // Validate that all files are PDFs
+        var invalidFiles = newFiles.Where(f => !f.Name.EndsWith(".pdf", StringComparison.OrdinalIgnoreCase)).ToList();
+        if (invalidFiles.Any())
+        {
+            statusMessage = $"Invalid file types detected. Only PDF files are allowed: {string.Join(", ", invalidFiles.Select(f => f.Name))}";
+            messageIntent = MessageIntent.Error;
+            return;
+        }
+        
+        isProcessing = true;
+        statusMessage = "Reading selected files...";
+        StateHasChanged();
+        
+        try
+        {
+            // Read file data immediately to avoid file ID issues
+            foreach (var file in newFiles)
+            {
+                if (selectedFiles.Count >= 10)
+                {
+                    statusMessage = "Maximum 10 files allowed for merging.";
+                    messageIntent = MessageIntent.Warning;
+                    break;
+                }
+                
+                var stream = file.OpenReadStream(maxAllowedSize: 50 * 1024 * 1024); // 50MB limit per file
+                var buffer = new byte[file.Size];
+                await stream.ReadAsync(buffer);
+                stream.Close();
+                
+                selectedFiles.Add((file.Name, file.Size, buffer));
+            }
+            
+            statusMessage = $"Successfully loaded {selectedFiles.Count} files.";
+            messageIntent = MessageIntent.Success;
+        }
+        catch (Exception ex)
+        {
+            statusMessage = $"Error reading files: {ex.Message}";
+            messageIntent = MessageIntent.Error;
+        }
+        finally
+        {
+            isProcessing = false;
+            StateHasChanged();
+        }
+    }
+    
+    private void RemoveFile((string Name, long Size, byte[] Data) file)
+    {
+        selectedFiles.Remove(file);
+        statusMessage = string.Empty;
+        mergedPdfData = null;
+        StateHasChanged();
+    }
+    
+    private void ClearFiles()
+    {
+        selectedFiles.Clear();
+        mergedPdfData = null;
+        statusMessage = string.Empty;
+        StateHasChanged();
+    }
+    
+    private async Task MergePdfs()
+    {
+        if (selectedFiles.Count < 2)
+        {
+            statusMessage = "Please select at least 2 PDF files to merge.";
+            messageIntent = MessageIntent.Warning;
+            return;
+        }
+        
+        isProcessing = true;
+        statusMessage = "Merging PDF files...";
+        messageIntent = MessageIntent.Info;
+        StateHasChanged();
+        
+        try
+        {
+            var streams = new List<Stream>();
+            
+            // Convert file data to streams
+            foreach (var file in selectedFiles)
+            {
+                var stream = new MemoryStream(file.Data);
+                streams.Add(stream);
+            }
+            
+            // Merge PDFs
+            mergedPdfData = await PdfMergeService.MergePdfsAsync(streams);
+            
+            // Cleanup streams
+            foreach (var stream in streams)
+            {
+                stream.Dispose();
+            }
+            
+            statusMessage = $"Successfully merged {selectedFiles.Count} PDF files!";
+            messageIntent = MessageIntent.Success;
+        }
+        catch (Exception ex)
+        {
+            statusMessage = $"Error merging PDFs: {ex.Message}";
+            messageIntent = MessageIntent.Error;
+            mergedPdfData = null;
+        }
+        finally
+        {
+            isProcessing = false;
+            StateHasChanged();
+        }
+    }
+    
+    private async Task DownloadMergedPdf()
+    {
+        if (mergedPdfData == null) return;
+        
+        var fileName = $"merged-document-{DateTime.Now:yyyyMMdd-HHmmss}.pdf";
+        
+        await JSRuntime.InvokeVoidAsync("downloadFile", fileName, "application/pdf", mergedPdfData);
+    }
+    
+    private static string FormatFileSize(long bytes)
+    {
+        string[] sizes = { "B", "KB", "MB", "GB" };
+        double len = bytes;
+        int order = 0;
+        while (len >= 1024 && order < sizes.Length - 1)
+        {
+            order++;
+            len = len / 1024;
+        }
+        return $"{len:0.##} {sizes[order]}";
+    }
+}

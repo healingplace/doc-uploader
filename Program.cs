@@ -17,6 +17,9 @@ builder.Services.Configure<BlobStorageOptions>(
 builder.Services.AddMsalAuthentication(options =>
 {
     builder.Configuration.Bind("AzureAd", options.ProviderOptions.Authentication);
+
+        // Add your API scope
+    // options.ProviderOptions.DefaultAccessTokenScopes.Add("api://693eed20-68f0-448e-b5df-d6892e8c08c0/SASKey.Write");
     
     // B2C specific configuration
     options.ProviderOptions.Authentication.ValidateAuthority = false;
@@ -33,6 +36,8 @@ builder.Services.AddMsalAuthentication(options =>
 
 builder.Services.AddScoped(sp => new HttpClient { BaseAddress = new Uri(builder.HostEnvironment.BaseAddress) });
 builder.Services.AddScoped<IDocumentUploadService, DocumentUploadService>();
+builder.Services.AddScoped<IPdfMergeService, PdfMergeService>();
+builder.Services.AddScoped<IFileConverterService, FileConverterService>();
 builder.Services.AddFluentUIComponents();
 
 await builder.Build().RunAsync();

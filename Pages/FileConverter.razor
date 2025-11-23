@@ -1,0 +1,425 @@
+@page "/fileconvert"
+@using UploaderDoc.Services
+@using Microsoft.JSInterop
+@inject IFileConverterService FileConverterService
+@inject IJSRuntime JSRuntime
+
+<PageTitle>File to PDF Converter - UploaderDoc</PageTitle>
+
+<div class="container-fluid">
+    <div class="row">
+        <div class="col-12">
+            <h1 class="mb-4">
+                <FluentIcon Value="@(new Icons.Regular.Size24.DocumentArrowRight())" Color="Color.Accent" />
+                File to PDF Converter
+            </h1>
+            
+            <FluentCard class="mb-4">
+                <div class="card-body">
+                    <h5 class="card-title">Convert Files to PDF</h5>
+                    <p class="card-text text-muted">
+                        Upload image files (JPEG, PNG, BMP, TIFF, WEBP) to convert them to PDF format. 
+                        Each file will be converted to a separate PDF page.
+                    </p>
+                    
+                    <div class="mb-3">
+                        <label class="form-label">Supported formats:</label>
+                        <div class="supported-formats">
+                            @foreach (var format in FileConverterService.GetSupportedFormats())
+                            {
+                                <span class="badge bg-secondary me-1">@format</span>
+                            }
+                        </div>
+                    </div>
+                    
+                    <InputFile id="convertFiles" 
+                             multiple 
+                             accept="@string.Join(",", FileConverterService.GetSupportedFormats())"
+                             OnChange="@OnFilesSelected"
+                             class="form-control mb-3" />
+                    
+                    @if (selectedFiles.Any())
+                    {
+                        <div class="mt-3">
+                            <h6>Selected Files (@selectedFiles.Count):</h6>
+                            <FluentDataGrid Items="@selectedFiles.AsQueryable()" class="file-grid">
+                                <PropertyColumn Property="@(f => f.Name)" Title="File Name" />
+                                <PropertyColumn Property="@(f => FormatFileSize(f.Size))" Title="Size" />
+                                <PropertyColumn Property="@(f => GetFileType(f.Name))" Title="Type" />
+                                <TemplateColumn Title="Status">
+                                    @if (conversionResults.ContainsKey(context.Name))
+                                    {
+                                        var result = conversionResults[context.Name];
+                                        if (result.IsSuccess)
+                                        {
+                                            <span class="badge bg-success">
+                                                <FluentIcon Value="@(new Icons.Regular.Size16.CheckmarkCircle())" />
+                                                Converted
+                                            </span>
+                                        }
+                                        else
+                                        {
+                                            <span class="badge bg-danger" title="@result.ErrorMessage">
+                                                <FluentIcon Value="@(new Icons.Regular.Size16.ErrorCircle())" />
+                                                Failed
+                                            </span>
+                                        }
+                                    }
+                                    else if (isProcessing)
+                                    {
+                                        <span class="badge bg-warning">
+                                            <FluentIcon Value="@(new Icons.Regular.Size16.Clock())" />
+                                            Processing...
+                                        </span>
+                                    }
+                                    else
+                                    {
+                                        <span class="badge bg-secondary">
+                                            <FluentIcon Value="@(new Icons.Regular.Size16.Document())" />
+                                            Ready
+                                        </span>
+                                    }
+                                </TemplateColumn>
+                                <TemplateColumn Title="Actions">
+                                    <FluentButton Appearance="Appearance.Lightweight" 
+                                                OnClick="@(() => RemoveFile(context))"
+                                                Disabled="@isProcessing"
+                                                IconStart="@(new Icons.Regular.Size16.Delete())">
+                                        Remove
+                                    </FluentButton>
+                                </TemplateColumn>
+                            </FluentDataGrid>
+                        </div>
+                        
+                        <div class="mt-3 d-flex gap-2">
+                            <FluentButton Appearance="Appearance.Accent" 
+                                        OnClick="@ConvertFiles"
+                                        Loading="@isProcessing"
+                                        Disabled="@(selectedFiles.Count == 0 || isProcessing)"
+                                        IconStart="@(new Icons.Regular.Size16.DocumentArrowRight())">
+                                @if (isProcessing)
+                                {
+                                    <span>Converting Files...</span>
+                                }
+                                else
+                                {
+                                    <span>Convert to PDF</span>
+                                }
+                            </FluentButton>
+                            
+                            <FluentButton Appearance="Appearance.Neutral" 
+                                        OnClick="@ClearFiles"
+                                        Disabled="@isProcessing"
+                                        IconStart="@(new Icons.Regular.Size16.Delete())">
+                                Clear All
+                            </FluentButton>
+                        </div>
+                    }
+                </div>
+            </FluentCard>
+            
+            @if (!string.IsNullOrEmpty(statusMessage))
+            {
+                <FluentMessageBar Intent="@messageIntent" Class="mb-3">
+                    @statusMessage
+                </FluentMessageBar>
+            }
+            
+            @if (convertedFiles.Any())
+            {
+                <FluentCard>
+                    <div class="card-body">
+                        <h5 class="card-title text-success">
+                            <FluentIcon Value="@(new Icons.Regular.Size20.CheckmarkCircle())" Color="Color.Success" />
+                            Conversion Complete
+                        </h5>
+                        <p class="card-text">
+                            @convertedFiles.Count file(s) converted successfully. Click to download individual PDFs.
+                        </p>
+                        
+                        <div class="converted-files">
+                            @foreach (var file in convertedFiles)
+                            {
+                                <div class="converted-file-item d-flex justify-content-between align-items-center">
+                                    <div>
+                                        <strong>@file.ConvertedFileName</strong>
+                                        <small class="text-muted d-block">
+                                            Original: @FormatFileSize(file.OriginalSize) → PDF: @FormatFileSize(file.ConvertedSize)
+                                        </small>
+                                    </div>
+                                    <FluentButton Appearance="Appearance.Accent" 
+                                                OnClick="@(() => DownloadPdf(file))"
+                                                IconStart="@(new Icons.Regular.Size16.ArrowDownload())">
+                                        Download
+                                    </FluentButton>
+                                </div>
+                            }
+                        </div>
+                        
+                        @if (convertedFiles.Count > 1)
+                        {
+                            <hr />
+                            <FluentButton Appearance="Appearance.Accent" 
+                                        OnClick="@DownloadAllAsZip"
+                                        IconStart="@(new Icons.Regular.Size16.FolderZip())">
+                                Download All as ZIP
+                            </FluentButton>
+                        }
+                    </div>
+                </FluentCard>
+            }
+        </div>
+    </div>
+</div>
+
+<style>
+    .file-grid {
+        width: 100%;
+    }
+    
+    .card-body {
+        padding: 1.5rem;
+    }
+    
+    .d-flex {
+        display: flex;
+    }
+    
+    .justify-content-between {
+        justify-content: space-between;
+    }
+    
+    .align-items-center {
+        align-items: center;
+    }
+    
+    .gap-2 {
+        gap: 0.5rem;
+    }
+    
+    .text-muted {
+        color: #6c757d;
+    }
+    
+    .text-success {
+        color: #198754;
+    }
+    
+    .form-control {
+        display: block;
+        width: 100%;
+        padding: 0.375rem 0.75rem;
+        font-size: 1rem;
+        font-weight: 400;
+        line-height: 1.5;
+        color: var(--fluent-neutral-foreground-rest);
+        background-color: var(--fluent-neutral-fill-input-rest);
+        border: 1px solid var(--fluent-neutral-stroke-control-rest);
+        border-radius: 0.375rem;
+        transition: border-color 0.15s ease-in-out, box-shadow 0.15s ease-in-out;
+    }
+    
+    .form-control:focus {
+        color: var(--fluent-neutral-foreground-rest);
+        background-color: var(--fluent-neutral-fill-input-rest);
+        border-color: var(--fluent-accent-fill-rest);
+        outline: 0;
+        box-shadow: 0 0 0 0.2rem rgba(var(--fluent-accent-fill-rest), 0.25);
+    }
+    
+    .supported-formats .badge {
+        background-color: var(--fluent-neutral-fill-secondary-rest) !important;
+        color: var(--fluent-neutral-foreground-rest);
+        margin-right: 0.25rem;
+        margin-bottom: 0.25rem;
+        display: inline-block;
+    }
+    
+    .converted-file-item {
+        padding: 0.75rem;
+        border: 1px solid var(--fluent-neutral-stroke-control-rest);
+        border-radius: 0.375rem;
+        margin-bottom: 0.5rem;
+    }
+    
+    .badge {
+        padding: 0.25rem 0.5rem;
+        font-size: 0.75rem;
+        border-radius: 0.375rem;
+    }
+    
+    .bg-success { background-color: #198754 !important; color: white; }
+    .bg-danger { background-color: #dc3545 !important; color: white; }
+    .bg-warning { background-color: #ffc107 !important; color: black; }
+    .bg-secondary { background-color: #6c757d !important; color: white; }
+</style>
+
+@code {
+    private List<IBrowserFile> selectedFiles = new();
+    private List<ConvertedFile> convertedFiles = new();
+    private Dictionary<string, ConversionResult> conversionResults = new();
+    private bool isProcessing = false;
+    private string statusMessage = string.Empty;
+    private MessageIntent messageIntent = MessageIntent.Info;
+    
+    private class ConversionResult
+    {
+        public bool IsSuccess { get; set; }
+        public string ErrorMessage { get; set; } = string.Empty;
+        public ConvertedFile? ConvertedFile { get; set; }
+    }
+    
+    private async Task OnFilesSelected(InputFileChangeEventArgs e)
+    {
+        statusMessage = string.Empty;
+        convertedFiles.Clear();
+        conversionResults.Clear();
+        
+        var newFiles = e.GetMultipleFiles();
+        
+        // Validate that all files are supported formats
+        var invalidFiles = newFiles.Where(f => !FileConverterService.IsSupportedFormat(f.Name)).ToList();
+        if (invalidFiles.Any())
+        {
+            var supportedFormats = string.Join(", ", FileConverterService.GetSupportedFormats());
+            statusMessage = $"Unsupported file types detected. Supported formats: {supportedFormats}. Invalid files: {string.Join(", ", invalidFiles.Select(f => f.Name))}";
+            messageIntent = MessageIntent.Error;
+            return;
+        }
+        
+        selectedFiles.AddRange(newFiles);
+        
+        if (selectedFiles.Count > 20)
+        {
+            statusMessage = "Maximum 20 files allowed for conversion.";
+            messageIntent = MessageIntent.Warning;
+            selectedFiles = selectedFiles.Take(20).ToList();
+        }
+        
+        StateHasChanged();
+    }
+    
+    private void RemoveFile(IBrowserFile file)
+    {
+        selectedFiles.Remove(file);
+        conversionResults.Remove(file.Name);
+        convertedFiles.RemoveAll(cf => cf.OriginalFileName == file.Name);
+        statusMessage = string.Empty;
+        StateHasChanged();
+    }
+    
+    private void ClearFiles()
+    {
+        selectedFiles.Clear();
+        convertedFiles.Clear();
+        conversionResults.Clear();
+        statusMessage = string.Empty;
+        StateHasChanged();
+    }
+    
+    private async Task ConvertFiles()
+    {
+        if (selectedFiles.Count == 0)
+        {
+            statusMessage = "Please select files to convert.";
+            messageIntent = MessageIntent.Warning;
+            return;
+        }
+        
+        isProcessing = true;
+        statusMessage = "Converting files to PDF...";
+        messageIntent = MessageIntent.Info;
+        conversionResults.Clear();
+        convertedFiles.Clear();
+        StateHasChanged();
+        
+        var successCount = 0;
+        var errorCount = 0;
+        
+        foreach (var file in selectedFiles)
+        {
+            try
+            {
+                using var stream = new MemoryStream();
+                await file.OpenReadStream(maxAllowedSize: 50 * 1024 * 1024).CopyToAsync(stream); // 50MB limit per file
+                
+                var pdfData = await FileConverterService.ConvertToPdfAsync(stream, file.Name);
+                
+                var convertedFile = new ConvertedFile
+                {
+                    OriginalFileName = file.Name,
+                    ConvertedFileName = $"{Path.GetFileNameWithoutExtension(file.Name)}.pdf",
+                    PdfData = pdfData,
+                    OriginalSize = file.Size,
+                    ConvertedSize = pdfData.Length
+                };
+                
+                convertedFiles.Add(convertedFile);
+                conversionResults[file.Name] = new ConversionResult 
+                { 
+                    IsSuccess = true, 
+                    ConvertedFile = convertedFile 
+                };
+                successCount++;
+            }
+            catch (Exception ex)
+            {
+                conversionResults[file.Name] = new ConversionResult 
+                { 
+                    IsSuccess = false, 
+                    ErrorMessage = ex.Message 
+                };
+                errorCount++;
+            }
+            
+            StateHasChanged(); // Update UI after each file
+        }
+        
+        statusMessage = $"Conversion complete! {successCount} successful, {errorCount} failed.";
+        messageIntent = errorCount > 0 ? MessageIntent.Warning : MessageIntent.Success;
+        isProcessing = false;
+        StateHasChanged();
+    }
+    
+    private void DownloadPdf(ConvertedFile file)
+    {
+        _ = JSRuntime.InvokeVoidAsync("downloadFile", file.ConvertedFileName, "application/pdf", file.PdfData);
+    }
+    
+    private async Task DownloadAllAsZip()
+    {
+        // For now, we'll download each file individually
+        // In a production app, you might want to implement actual ZIP creation
+        statusMessage = "Downloading all PDF files...";
+        messageIntent = MessageIntent.Info;
+        StateHasChanged();
+        
+        foreach (var file in convertedFiles)
+        {
+            await JSRuntime.InvokeVoidAsync("downloadFile", file.ConvertedFileName, "application/pdf", file.PdfData);
+            await Task.Delay(500); // Small delay between downloads
+        }
+        
+        statusMessage = "All files downloaded successfully!";
+        messageIntent = MessageIntent.Success;
+        StateHasChanged();
+    }
+    
+    private static string FormatFileSize(long bytes)
+    {
+        string[] sizes = { "B", "KB", "MB", "GB" };
+        double len = bytes;
+        int order = 0;
+        while (len >= 1024 && order < sizes.Length - 1)
+        {
+            order++;
+            len = len / 1024;
+        }
+        return $"{len:0.##} {sizes[order]}";
+    }
+    
+    private static string GetFileType(string fileName)
+    {
+        return Path.GetExtension(fileName).ToUpperInvariant().TrimStart('.');
+    }
+}
