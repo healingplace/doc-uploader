@@ -1,0 +1,455 @@
+@page "/pdfoptimize"
+@using UploaderDoc.Services
+@using Microsoft.JSInterop
+@inject IPdfOptimizerService PdfOptimizerService
+@inject IJSRuntime JSRuntime
+
+<PageTitle>PDF Optimizer - UploaderDoc</PageTitle>
+
+<div class="container-fluid">
+    <div class="row">
+        <div class="col-12">
+            <h1 class="mb-4">
+                <FluentIcon Value="@(new Icons.Regular.Size24.Settings())" Color="Color.Accent" />
+                PDF Optimizer
+            </h1>
+            
+            <FluentCard class="mb-4">
+                <div class="card-body">
+                    <h5 class="card-title">Optimize and Rotate PDF Files</h5>
+                    <p class="card-text text-muted">
+                        Upload a PDF file to rotate pages and/or optimize file size through compression.
+                    </p>
+                    
+                    <InputFile id="pdfFile" 
+                             accept=".pdf"
+                             OnChange="@OnPdfFileSelected"
+                             class="form-control mb-3" />
+                    
+                    @if (selectedFile != null)
+                    {
+                        <div class="mt-3">
+                            <FluentCard class="file-info-card">
+                                <div class="d-flex justify-content-between align-items-center">
+                                    <div>
+                                        <strong>@selectedFile.Name</strong>
+                                        <small class="text-muted d-block">Size: @FormatFileSize(selectedFile.Size)</small>
+                                    </div>
+                                    <FluentButton Appearance="Appearance.Lightweight" 
+                                                OnClick="@ClearFile"
+                                                IconStart="@(new Icons.Regular.Size16.Delete())">
+                                        Remove
+                                    </FluentButton>
+                                </div>
+                            </FluentCard>
+                        </div>
+                        
+                        <div class="mt-4">
+                            <h6>Optimization Options:</h6>
+                            
+                            <div class="options-grid">
+                                <div class="option-item">
+                                    <FluentLabel>Rotation Angle:</FluentLabel>
+                                    <FluentSelect TOption="string" @bind-Value="@selectedRotationString" 
+                                                 Style="width: 100%;"
+                                                 Disabled="@isProcessing">
+                                        <FluentOption TOption="string" Value="0">No Rotation (0°)</FluentOption>
+                                        <FluentOption TOption="string" Value="90">Clockwise 90°</FluentOption>
+                                        <FluentOption TOption="string" Value="180">180°</FluentOption>
+                                        <FluentOption TOption="string" Value="270">Counter-clockwise 90° (270°)</FluentOption>
+                                    </FluentSelect>
+                                </div>
+                                
+                                <div class="option-item">
+                                    <FluentLabel>Compression Level:</FluentLabel>
+                                    <FluentSelect TOption="string" @bind-Value="@selectedCompressionString" 
+                                                 Style="width: 100%;"
+                                                 Disabled="@isProcessing">
+                                        <FluentOption TOption="string" Value="@nameof(CompressionLevel.None)">No Compression</FluentOption>
+                                        <FluentOption TOption="string" Value="@nameof(CompressionLevel.Low)">Low (Faster)</FluentOption>
+                                        <FluentOption TOption="string" Value="@nameof(CompressionLevel.Medium)">Medium (Balanced)</FluentOption>
+                                        <FluentOption TOption="string" Value="@nameof(CompressionLevel.High)">High (Smaller Size)</FluentOption>
+                                    </FluentSelect>
+                                </div>
+                            </div>
+                            
+                            <div class="mt-3">
+                                <FluentMessageBar Intent="MessageIntent.Info" Class="mb-3">
+                                    <strong>Tip:</strong> Higher compression levels will reduce file size but may take longer to process.
+                                    Rotation is applied to all pages in the document.
+                                </FluentMessageBar>
+                            </div>
+                        </div>
+                        
+                        <div class="mt-3 d-flex gap-2">
+                            <FluentButton Appearance="Appearance.Accent" 
+                                        OnClick="@ProcessPdf"
+                                        Loading="@isProcessing"
+                                        Disabled="@isProcessing"
+                                        IconStart="@(new Icons.Regular.Size16.Settings())">
+                                @if (isProcessing)
+                                {
+                                    <span>Processing PDF...</span>
+                                }
+                                else
+                                {
+                                    <span>Optimize PDF</span>
+                                }
+                            </FluentButton>
+                            
+                            <FluentButton Appearance="Appearance.Neutral" 
+                                        OnClick="@ClearFile"
+                                        Disabled="@isProcessing"
+                                        IconStart="@(new Icons.Regular.Size16.Delete())">
+                                Clear
+                            </FluentButton>
+                        </div>
+                    }
+                </div>
+            </FluentCard>
+            
+            @if (!string.IsNullOrEmpty(statusMessage))
+            {
+                <FluentMessageBar Intent="@messageIntent" Class="mb-3">
+                    @statusMessage
+                </FluentMessageBar>
+            }
+            
+            @if (optimizedPdfData != null)
+            {
+                <FluentCard>
+                    <div class="card-body">
+                        <h5 class="card-title text-success">
+                            <FluentIcon Value="@(new Icons.Regular.Size20.CheckmarkCircle())" Color="Color.Success" />
+                            PDF Optimization Complete
+                        </h5>
+                        <div class="result-info">
+                            <p class="card-text">
+                                Your PDF has been successfully processed!
+                            </p>
+                            <div class="size-comparison">
+                                <div class="size-item">
+                                    <strong>Original Size:</strong>
+                                    <span>@FormatFileSize(originalFileSize)</span>
+                                </div>
+                                <FluentIcon Value="@(new Icons.Regular.Size20.ArrowRight())" />
+                                <div class="size-item">
+                                    <strong>Optimized Size:</strong>
+                                    <span>@FormatFileSize(optimizedPdfData.Length)</span>
+                                </div>
+                                <div class="size-item savings">
+                                    @{
+                                        var savingsPercent = originalFileSize > 0 
+                                            ? (1 - (double)optimizedPdfData.Length / originalFileSize) * 100 
+                                            : 0;
+                                        var savingsColor = savingsPercent > 0 ? "text-success" : "text-info";
+                                    }
+                                    <strong class="@savingsColor">
+                                        @if (savingsPercent > 0)
+                                        {
+                                            <span>Saved: @savingsPercent.ToString("F1")%</span>
+                                        }
+                                        else if (savingsPercent < 0)
+                                        {
+                                            <span>Increased: @((-savingsPercent).ToString("F1"))%</span>
+                                        }
+                                        else
+                                        {
+                                            <span>No change</span>
+                                        }
+                                    </strong>
+                                </div>
+                            </div>
+                        </div>
+                        <FluentButton Appearance="Appearance.Accent" 
+                                    OnClick="DownloadOptimizedPdf"
+                                    IconStart="@(new Icons.Regular.Size16.ArrowDownload())">
+                            Download Optimized PDF
+                        </FluentButton>
+                    </div>
+                </FluentCard>
+            }
+        </div>
+    </div>
+</div>
+
+<style>
+    .card-body {
+        padding: 1.5rem;
+    }
+    
+    .file-info-card {
+        padding: 1rem;
+        background-color: var(--fluent-neutral-fill-secondary-rest);
+    }
+    
+    .d-flex {
+        display: flex;
+    }
+    
+    .justify-content-between {
+        justify-content: space-between;
+    }
+    
+    .align-items-center {
+        align-items: center;
+    }
+    
+    .gap-2 {
+        gap: 0.5rem;
+    }
+    
+    .text-muted {
+        color: #6c757d;
+    }
+    
+    .text-success {
+        color: #198754;
+    }
+    
+    .text-info {
+        color: #0dcaf0;
+    }
+    
+    .form-control {
+        display: block;
+        width: 100%;
+        padding: 0.375rem 0.75rem;
+        font-size: 1rem;
+        font-weight: 400;
+        line-height: 1.5;
+        color: var(--fluent-neutral-foreground-rest);
+        background-color: var(--fluent-neutral-fill-input-rest);
+        border: 1px solid var(--fluent-neutral-stroke-control-rest);
+        border-radius: 0.375rem;
+        transition: border-color 0.15s ease-in-out, box-shadow 0.15s ease-in-out;
+    }
+    
+    .form-control:focus {
+        color: var(--fluent-neutral-foreground-rest);
+        background-color: var(--fluent-neutral-fill-input-rest);
+        border-color: var(--fluent-accent-fill-rest);
+        outline: 0;
+        box-shadow: 0 0 0 0.2rem rgba(var(--fluent-accent-fill-rest), 0.25);
+    }
+    
+    .options-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+        gap: 1rem;
+        margin-top: 1rem;
+    }
+    
+    .option-item {
+        display: flex;
+        flex-direction: column;
+        gap: 0.5rem;
+    }
+    
+    .result-info {
+        margin-bottom: 1.5rem;
+    }
+    
+    .size-comparison {
+        display: flex;
+        align-items: center;
+        gap: 1rem;
+        padding: 1rem;
+        background-color: var(--fluent-neutral-fill-secondary-rest);
+        border-radius: 0.375rem;
+        margin-top: 1rem;
+        flex-wrap: wrap;
+    }
+    
+    .size-item {
+        display: flex;
+        flex-direction: column;
+        gap: 0.25rem;
+    }
+    
+    .size-item.savings {
+        margin-left: auto;
+    }
+    
+    @@media (max-width: 768px) {
+        .size-comparison {
+            flex-direction: column;
+            align-items: flex-start;
+        }
+        
+        .size-item.savings {
+            margin-left: 0;
+        }
+    }
+</style>
+
+@code {
+    private IBrowserFile? selectedFile;
+    private byte[]? optimizedPdfData;
+    private byte[]? originalFileData;
+    private long originalFileSize;
+    private bool isProcessing = false;
+    private string statusMessage = string.Empty;
+    private MessageIntent messageIntent = MessageIntent.Info;
+    
+    private string selectedRotationString = "0";
+    private int selectedRotation => int.Parse(selectedRotationString);
+    
+    private string selectedCompressionString = nameof(CompressionLevel.Medium);
+    private CompressionLevel selectedCompression => Enum.Parse<CompressionLevel>(selectedCompressionString);
+    
+    private async Task OnPdfFileSelected(InputFileChangeEventArgs e)
+    {
+        statusMessage = string.Empty;
+        optimizedPdfData = null;
+        originalFileData = null;
+        
+        var file = e.File;
+        
+        // Validate that file is a PDF
+        if (!file.Name.EndsWith(".pdf", StringComparison.OrdinalIgnoreCase))
+        {
+            statusMessage = "Please select a PDF file.";
+            messageIntent = MessageIntent.Error;
+            return;
+        }
+        
+        selectedFile = file;
+        originalFileSize = file.Size;
+        
+        // Read file data immediately to avoid file ID issues
+        try
+        {
+            Console.WriteLine($"Reading file: {file.Name}, Size: {file.Size}, ContentType: {file.ContentType}");
+            using var memoryStream = new MemoryStream();
+            using var fileStream = file.OpenReadStream(maxAllowedSize: 100 * 1024 * 1024); // 100MB limit
+            await fileStream.CopyToAsync(memoryStream);
+            
+            originalFileData = memoryStream.ToArray();
+            Console.WriteLine($"File data read successfully. Byte array length: {originalFileData.Length}");
+            Console.WriteLine($"First few bytes: {BitConverter.ToString(originalFileData.Take(10).ToArray())}");
+            
+            // Validate PDF header
+            if (originalFileData.Length < 4 || 
+                originalFileData[0] != 0x25 || // %
+                originalFileData[1] != 0x50 || // P
+                originalFileData[2] != 0x44 || // D
+                originalFileData[3] != 0x46)   // F
+            {
+                statusMessage = "Invalid PDF file. The file does not have a valid PDF header. Please ensure you're uploading an actual PDF file.";
+                messageIntent = MessageIntent.Error;
+                selectedFile = null;
+                originalFileData = null;
+                StateHasChanged();
+                return;
+            }
+            
+            statusMessage = $"PDF loaded successfully. File size: {FormatFileSize(file.Size)}";
+            messageIntent = MessageIntent.Success;
+        }
+        catch (Exception ex)
+        {
+            statusMessage = $"Error loading PDF: {ex.Message}";
+            messageIntent = MessageIntent.Error;
+            selectedFile = null;
+            originalFileData = null;
+        }
+        
+        StateHasChanged();
+    }
+    
+    private void ClearFile()
+    {
+        selectedFile = null;
+        optimizedPdfData = null;
+        originalFileData = null;
+        statusMessage = string.Empty;
+        selectedRotationString = "0";
+        selectedCompressionString = nameof(CompressionLevel.Medium);
+        StateHasChanged();
+    }
+    
+    private async Task ProcessPdf()
+    {
+        if (selectedFile == null || originalFileData == null)
+        {
+            statusMessage = "Please select a PDF file first.";
+            messageIntent = MessageIntent.Warning;
+            return;
+        }
+        
+        // Check if any optimization is selected
+        if (selectedRotation == 0 && selectedCompression == CompressionLevel.None)
+        {
+            statusMessage = "Please select at least one optimization option (rotation or compression).";
+            messageIntent = MessageIntent.Warning;
+            return;
+        }
+        
+        isProcessing = true;
+        statusMessage = "Processing PDF...";
+        messageIntent = MessageIntent.Info;
+        StateHasChanged();
+        
+        try
+        {
+            Console.WriteLine($"ProcessPdf: Creating stream from byte array. Length: {originalFileData.Length}");
+            Console.WriteLine($"Rotation: {selectedRotation}, Compression: {selectedCompression}");
+            using var stream = new MemoryStream(originalFileData);
+            Console.WriteLine($"Stream created. Length: {stream.Length}, Position: {stream.Position}");
+            
+            // Apply rotation and/or compression
+            if (selectedRotation != 0 && selectedCompression != CompressionLevel.None)
+            {
+                optimizedPdfData = await PdfOptimizerService.RotateAndOptimizePdfAsync(
+                    stream, selectedRotation, selectedCompression);
+                statusMessage = $"PDF rotated by {selectedRotation}° and compressed successfully!";
+            }
+            else if (selectedRotation != 0)
+            {
+                optimizedPdfData = await PdfOptimizerService.RotatePdfAsync(stream, selectedRotation);
+                statusMessage = $"PDF rotated by {selectedRotation}° successfully!";
+            }
+            else
+            {
+                optimizedPdfData = await PdfOptimizerService.OptimizePdfSizeAsync(stream, selectedCompression);
+                statusMessage = "PDF compressed successfully!";
+            }
+            
+            messageIntent = MessageIntent.Success;
+        }
+        catch (Exception ex)
+        {
+            statusMessage = $"Error processing PDF: {ex.Message}";
+            messageIntent = MessageIntent.Error;
+            optimizedPdfData = null;
+        }
+        finally
+        {
+            isProcessing = false;
+            StateHasChanged();
+        }
+    }
+    
+    private async Task DownloadOptimizedPdf()
+    {
+        if (optimizedPdfData == null || selectedFile == null) return;
+        
+        var fileName = $"optimized-{Path.GetFileNameWithoutExtension(selectedFile.Name)}-{DateTime.Now:yyyyMMdd-HHmmss}.pdf";
+        
+        await JSRuntime.InvokeVoidAsync("downloadFile", fileName, "application/pdf", optimizedPdfData);
+    }
+    
+    private static string FormatFileSize(long bytes)
+    {
+        string[] sizes = { "B", "KB", "MB", "GB" };
+        double len = bytes;
+        int order = 0;
+        while (len >= 1024 && order < sizes.Length - 1)
+        {
+            order++;
+            len = len / 1024;
+        }
+        return $"{len:0.##} {sizes[order]}";
+    }
+}

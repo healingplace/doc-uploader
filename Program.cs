@@ -38,6 +38,7 @@ builder.Services.AddScoped(sp => new HttpClient { BaseAddress = new Uri(builder.
 builder.Services.AddScoped<IDocumentUploadService, DocumentUploadService>();
 builder.Services.AddScoped<IPdfMergeService, PdfMergeService>();
 builder.Services.AddScoped<IFileConverterService, FileConverterService>();
+builder.Services.AddScoped<IPdfOptimizerService, PdfOptimizerService>();
 builder.Services.AddFluentUIComponents();
 
 await builder.Build().RunAsync();
